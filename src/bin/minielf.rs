@@ -1,7 +1,34 @@
+extern crate byteorder;
+use byteorder::{LittleEndian, WriteBytesExt};
+
 use std::fs::File;
 use std::io::prelude::*;
 
+struct Segment {
+    typ: u32,
+    address: u32,
+    size: u32,
+    flags: u32,
+    code: Vec<u8>,
+}
+
 fn main() -> std::io::Result<()> {
+    let start_address = 0x8000000;
+    let header_size = 4 + 4 + 8 + 8 * 2 + 5 * 4;
+    let pht_entry_size = 8 * 4;
+
+    let quit = vec![0xbb, 0x2a, 0, 0, 0, 0xb8, 1, 0, 0, 0, 0xcd, 0x80];
+
+    let main_segment = Segment {
+        typ: 1,
+        address: start_address,
+        size: 5,
+        flags: 5,
+        code: quit,
+    };
+
+    let segments = vec![main_segment];
+
     let mut buffer = File::create("out")?;
 
     // Magic number: 0x7F plus "ELF".
@@ -25,75 +52,78 @@ fn main() -> std::io::Result<()> {
     // Starting here, endianess goes into effect!
 
     // Object type: Executable is 2.
-    buffer.write(&[2, 0])?;
+    buffer.write_u16::<LittleEndian>(2)?;
 
     // Instruction set architecture. x86 is 3.
-    buffer.write(&[3, 0])?;
+    buffer.write_u16::<LittleEndian>(3)?;
 
     // Always set to 1?
-    buffer.write(&[1, 0, 0, 0])?;
+    buffer.write_u32::<LittleEndian>(1)?;
 
     // Address of the entry point.
-    buffer.write(&[0x60, 0, 0, 8])?; // correct?
+    buffer.write_u32::<LittleEndian>(
+        start_address + header_size + pht_entry_size * (segments.len() as u32),
+    )?;
 
     // Start of the program header table.
-    buffer.write(&[0x40, 0, 0, 0])?; // correct?
+    buffer.write_u32::<LittleEndian>(header_size)?;
 
     // Start of the section header table.
-    buffer.write(&[0, 0, 0, 0])?;
+    buffer.write_u32::<LittleEndian>(0)?;
 
     // "flags"
-    buffer.write(&[0, 0, 0, 0])?;
+    buffer.write_u32::<LittleEndian>(0)?;
 
     // Size of the header.
-    buffer.write(&[0x34, 0])?;
+    buffer.write_u16::<LittleEndian>(header_size as u16)?;
 
     // Size of a program header table entry.
-    buffer.write(&[32, 0])?;
+    buffer.write_u16::<LittleEndian>(pht_entry_size as u16)?;
 
     // Number of entries in the program header table.
-    buffer.write(&[1, 0])?;
+    buffer.write_u16::<LittleEndian>(segments.len() as u16)?;
 
     // Size of a section header table entry.
-    buffer.write(&[0, 0])?;
+    buffer.write_u16::<LittleEndian>(0)?;
 
     // Number of entries in the section header table.
-    buffer.write(&[0, 0])?;
+    buffer.write_u16::<LittleEndian>(0)?;
 
     // Index of section header table entry that contains section names.
-    buffer.write(&[0, 0])?;
-
-    // Padding.
-    buffer.write(&[0; 12])?;
+    buffer.write_u16::<LittleEndian>(0)?;
 
     // Beginning of program header table.
 
-    // Type of the segment. Loadable segment is 1.
-    buffer.write(&[1, 0, 0, 0])?;
+    for segment in &segments {
+        // Type of the segment. Loadable segment is 1.
+        buffer.write_u32::<LittleEndian>(segment.typ)?;
 
-    // Offset.
-    buffer.write(&[0, 0, 0, 0])?;
+        // Offset.
+        buffer.write(&[0; 4])?;
 
-    // Virtual address of the segment in memory.
-    buffer.write(&[0, 0, 0, 8])?;
+        // Virtual address of the segment in memory.
+        buffer.write_u32::<LittleEndian>(segment.address)?;
 
-    // Physical address of the segment in memory.
-    buffer.write(&[0, 0, 0, 8])?;
+        // Physical address of the segment in memory.
+        buffer.write_u32::<LittleEndian>(segment.address)?;
 
-    // Size of the segment in the file image.
-    buffer.write(&[0x70, 0, 0, 0])?;
+        // Size of the segment in the file image.
+        buffer.write_u32::<LittleEndian>(segment.size)?;
 
-    // Size of the segment in memory.
-    buffer.write(&[0x70, 0, 0, 0])?;
+        // Size of the segment in memory.
+        buffer.write_u32::<LittleEndian>(segment.size)?;
 
-    // Segment-dependent flags.
-    buffer.write(&[5, 0, 0, 0])?;
+        // Segment-dependent flags.
+        buffer.write_u32::<LittleEndian>(segment.flags)?;
 
-    // Alignment.
-    buffer.write(&[0, 0, 0, 1])?;
+        // Alignment.
+        buffer.write_u32::<LittleEndian>(0)?;
+    }
 
     // Code.
-    buffer.write(&[0xbb, 0x2a, 0, 0, 0, 0xb8, 1, 0, 0, 0, 0xcd, 0x80])?;
+    for segment in &segments {
+        buffer.write(&segment.code)?;
+    }
 
     Ok(())
 }
