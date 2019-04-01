@@ -6,9 +6,10 @@ use std::io::prelude::*;
 
 struct Segment {
     typ: u32,
+    flags: u32,
+    offset: u64,
     address: u64,
     size: u64,
-    flags: u32,
     code: Vec<u8>,
 }
 
@@ -21,9 +22,10 @@ fn main() -> std::io::Result<()> {
 
     let main_segment = Segment {
         typ: 1,
+        flags: 5,
+        offset: 0,
         address: start_address,
         size: header_size + pht_entry_size + quit.len() as u64,
-        flags: 5,
         code: quit,
     };
 
@@ -54,7 +56,7 @@ fn main() -> std::io::Result<()> {
     // Object type: Executable is 2.
     buffer.write_u16::<LittleEndian>(2)?;
 
-    // Instruction set architecture. x86 is 3.
+    // Instruction set architecture. x86 is 3, AMD64 is 62.
     buffer.write_u16::<LittleEndian>(62)?;
 
     // Always set to 1?
@@ -102,7 +104,7 @@ fn main() -> std::io::Result<()> {
         buffer.write_u32::<LittleEndian>(segment.flags)?;
 
         // Offset.
-        buffer.write_u64::<LittleEndian>(0)?;
+        buffer.write_u64::<LittleEndian>(segment.offset)?;
 
         // Virtual address of the segment in memory.
         buffer.write_u64::<LittleEndian>(segment.address)?;
