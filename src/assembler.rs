@@ -23,6 +23,41 @@ fn to_u32(str: &str) -> u32 {
     }
 }
 
+fn call(
+    arguments: Vec<&str>,
+    location: u8,
+    labels: &HashMap<String, u8>,
+    panic_on_missing_label: bool,
+) -> AssemblyResult {
+    let label = arguments[0];
+    if panic_on_missing_label {
+        let label_location = labels.get(label).expect("Label not defined");
+        let jump_target = (*label_location as i32 - (location as i32 + 5)) as u32;
+        let mut ret = vec![0xe8];
+        ret.write_u32::<LittleEndian>(jump_target);
+        AssemblyResult::Bytes(ret)
+    } else {
+        AssemblyResult::Bytes(vec![0xe8, 0, 0, 0, 0])
+    }
+}
+
+fn jmp(
+    opcode: u8,
+    arguments: Vec<&str>,
+    location: u8,
+    labels: &HashMap<String, u8>,
+    panic_on_missing_label: bool,
+) -> AssemblyResult {
+    let label = arguments[0];
+    if panic_on_missing_label {
+        let label_location = labels.get(label).expect("Label not defined");
+        let jump_target = (*label_location as i8 - (location as i8 + 2)) as u8;
+        AssemblyResult::Bytes(vec![opcode, jump_target])
+    } else {
+        AssemblyResult::Bytes(vec![opcode, 0])
+    }
+}
+
 fn assemble_line(
     line: &str,
     location: u8,
@@ -43,6 +78,7 @@ fn assemble_line(
         arguments = arguments.iter().map(|a| a.trim()).collect();
         match op {
             "syscall" => AssemblyResult::Bytes(vec![0xf, 0x5]),
+            "ret" => AssemblyResult::Bytes(vec![0xc3]),
             "mov" => {
                 let target = arguments[0];
                 let source = arguments[1];
@@ -52,16 +88,12 @@ fn assemble_line(
                 ret.write_u32::<LittleEndian>(value).unwrap();
                 AssemblyResult::Bytes(ret)
             }
-            "jmp" => {
-                let label = arguments[0];
-                if panic_on_missing_label {
-                    let label_location = labels.get(label).expect("Label not defined");
-                    let jump_target = (*label_location as i8 - (location as i8 + 2)) as u8;
-                    AssemblyResult::Bytes(vec![0xeb, jump_target])
-                } else {
-                    AssemblyResult::Bytes(vec![0xeb, 0])
-                }
-            }
+            "jmp" => jmp(0xeb, arguments, location, labels, panic_on_missing_label),
+            "je" => jmp(0x74, arguments, location, labels, panic_on_missing_label),
+            "jg" => jmp(0x7f, arguments, location, labels, panic_on_missing_label),
+            "jl" => jmp(0x7c, arguments, location, labels, panic_on_missing_label),
+            "jle" => jmp(0x7e, arguments, location, labels, panic_on_missing_label),
+            "call" => call(arguments, location, labels, panic_on_missing_label),
             _ => panic!("Not implemented"),
         }
     }
@@ -115,6 +147,11 @@ mod tests {
     }
 
     #[test]
+    fn ret() {
+        assert_eq!(assemble("ret"), vec![0xc3]);
+    }
+
+    #[test]
     fn mov() {
         assert_eq!(assemble("mov eax, 60"), vec![0xb8, 0x3c, 0, 0, 0]);
         assert_eq!(assemble("mov ebx, 0x42"), vec![0xbb, 0x42, 0, 0, 0]);
@@ -127,6 +164,7 @@ mod tests {
     #[test]
     fn jmp() {
         assert_eq!(assemble("loop:\njmp loop"), vec![0xeb, 0xfe]);
+        assert_eq!(assemble("loop:\nje loop"), vec![0x74, 0xfe]);
         assert_eq!(
             assemble("forever:\njmp skip\njmp forever\nskip:"),
             vec![0xeb, 0x02, 0xeb, 0xfc]
@@ -134,10 +172,10 @@ mod tests {
     }
 
     #[test]
-    fn ass() {
+    fn call() {
         assert_eq!(
-            assemble("mov eax, 60\nsyscall"),
-            vec![0xb8, 0x3c, 0, 0, 0, 0xf, 0x5]
+            assemble("call loop\nret\nloop:"),
+            vec![0xe8, 1, 0, 0, 0, 0xc3]
         );
     }
 
