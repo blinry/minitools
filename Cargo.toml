@@ -8,3 +8,7 @@ edition = "2018"
 byteorder = "1"
 rustyline = "3.0.0"
 tempfile = "3.0.7"
+
+[lib]
+name = "minitools"
+path = "src/lib.rs"

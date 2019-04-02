@@ -1,7 +1,6 @@
 extern crate byteorder;
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use std::fs::File;
 use std::io::prelude::*;
 
 struct Segment {
@@ -13,25 +12,23 @@ struct Segment {
     code: Vec<u8>,
 }
 
-fn main() -> std::io::Result<()> {
+pub fn create_binary(instructions: Vec<u8>) -> std::io::Result<Vec<u8>> {
     let start_address = 0x6000000;
     let header_size = 4 + 4 + 8 + 8 * 2 + 2 * 4 + 3 * 8;
     let pht_entry_size = 2 * 4 + 6 * 8;
-
-    let quit = vec![0xb8, 0x3c, 0, 0, 0, 0xbf, 0x2a, 0, 0, 0, 0xf, 0x5];
 
     let main_segment = Segment {
         typ: 1,
         flags: 5,
         offset: 0,
         address: start_address,
-        size: header_size + pht_entry_size + quit.len() as u64,
-        code: quit,
+        size: header_size + pht_entry_size + instructions.len() as u64,
+        code: instructions,
     };
 
     let segments = vec![main_segment];
 
-    let mut buffer = File::create("out")?;
+    let mut buffer = vec![];
 
     // Magic number: 0x7F plus "ELF".
     buffer.write(&[0x7f, 'E' as u8, 'L' as u8, 'F' as u8])?;
@@ -127,5 +124,5 @@ fn main() -> std::io::Result<()> {
         buffer.write(&segment.code)?;
     }
 
-    Ok(())
+    Ok(buffer)
 }
