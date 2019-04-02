@@ -93,6 +93,12 @@ fn assemble_line(
             "jg" => jmp(0x7f, arguments, location, labels, panic_on_missing_label),
             "jl" => jmp(0x7c, arguments, location, labels, panic_on_missing_label),
             "jle" => jmp(0x7e, arguments, location, labels, panic_on_missing_label),
+            "cmp" => {
+                let target = arguments[0];
+                let value = to_u32(arguments[1]) as u8;
+                let modrm = 0xf8 + register_offset(target);
+                AssemblyResult::Bytes(vec![0x83, modrm, value])
+            }
             "call" => call(arguments, location, labels, panic_on_missing_label),
             _ => panic!("Not implemented"),
         }
@@ -179,8 +185,8 @@ mod tests {
         );
     }
 
-    //#[test]
-    //fn cmp() {
-    //    assert_eq!(assemble_line("cmp eax, 0"), vec![0x48, 0x83, 0xf8, 0]);
-    //}
+    #[test]
+    fn cmp() {
+        assert_eq!(assemble("cmp eax, 5"), vec![0x83, 0xf8, 5]);
+    }
 }
