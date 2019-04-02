@@ -19,6 +19,6 @@ fn main() -> std::io::Result<()> {
     perms.set_mode(perms.mode() | 0o700);
     fs::set_permissions(filename, perms)?;
 
-    buffer.write(&binary);
+    buffer.write(&binary)?;
     Ok(())
 }
