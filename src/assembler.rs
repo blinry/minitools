@@ -34,7 +34,7 @@ fn call(
         let label_location = labels.get(label).expect("Label not defined");
         let jump_target = (*label_location as i32 - (location as i32 + 5)) as u32;
         let mut ret = vec![0xe8];
-        ret.write_u32::<LittleEndian>(jump_target);
+        ret.write_u32::<LittleEndian>(jump_target).unwrap();
         AssemblyResult::Bytes(ret)
     } else {
         AssemblyResult::Bytes(vec![0xe8, 0, 0, 0, 0])
@@ -83,9 +83,15 @@ fn assemble_line(
                 let target = arguments[0];
                 let source = arguments[1];
                 let opcode = 0xb8 + register_offset(target);
-                let value = to_u32(source);
                 let mut ret = vec![opcode];
-                ret.write_u32::<LittleEndian>(value).unwrap();
+                if source.chars().next().unwrap().is_digit(10) {
+                    let value = to_u32(source);
+                    ret.write_u32::<LittleEndian>(value).unwrap();
+                } else {
+                    let label_location = labels.get(source).expect("Label not defined");
+                    ret.write_u32::<LittleEndian>(*label_location as u32)
+                        .unwrap();
+                }
                 AssemblyResult::Bytes(ret)
             }
             "jmp" => jmp(0xeb, arguments, location, labels, panic_on_missing_label),
@@ -100,6 +106,19 @@ fn assemble_line(
                 AssemblyResult::Bytes(vec![0x83, modrm, value])
             }
             "call" => call(arguments, location, labels, panic_on_missing_label),
+            "db" => {
+                let mut ret = vec![];
+                for arg in &arguments {
+                    if arg.chars().next().unwrap() == '"' {
+                        for char in arg.trim_left_matches("\"").trim_right_matches("\"").chars() {
+                            ret.push(char as u8);
+                        }
+                    } else {
+                        ret.push(to_u32(arg) as u8);
+                    }
+                }
+                AssemblyResult::Bytes(ret)
+            }
             _ => panic!("Not implemented"),
         }
     }
@@ -188,5 +207,14 @@ mod tests {
     #[test]
     fn cmp() {
         assert_eq!(assemble("cmp eax, 5"), vec![0x83, 0xf8, 5]);
+    }
+
+    #[test]
+    fn db() {
+        assert_eq!(assemble("db 0x42"), vec![0x42]);
+        assert_eq!(assemble("db 42"), vec![42]);
+        assert_eq!(assemble("db \"*\""), vec![42]);
+        assert_eq!(assemble("db \"*\", 0x42, 42"), vec![42, 0x42, 42]);
+        assert_eq!(assemble("db \"hello\""), vec![104, 101, 108, 108, 111]);
     }
 }
