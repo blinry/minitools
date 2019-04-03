@@ -9,8 +9,8 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let assembly = fs::read_to_string(&args[1])?;
 
-    let bytes = minitools::assembler::assemble(&assembly);
-    let binary = minitools::elf::create_binary(bytes)?;
+    let sections = minitools::assembler::assemble(&assembly);
+    let binary = minitools::elf::create_binary(sections)?;
 
     let filename = Path::new(&args[1]).file_stem().unwrap();
     let mut buffer = File::create(filename)?;

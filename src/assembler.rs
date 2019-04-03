@@ -7,6 +7,7 @@ use std::io::prelude::*;
 enum AssemblyResult {
     Bytes(Vec<u8>),
     Label(String),
+    Section(String),
 }
 
 fn register_offset(reg: &str) -> u8 {
@@ -77,6 +78,7 @@ fn assemble_line(
         let mut arguments: Vec<&str> = parts.next().unwrap_or("").split(",").collect();
         arguments = arguments.iter().map(|a| a.trim()).collect();
         match op {
+            "section" => AssemblyResult::Section(arguments[0].to_string()),
             "syscall" => AssemblyResult::Bytes(vec![0xf, 0x5]),
             "ret" => AssemblyResult::Bytes(vec![0xc3]),
             "mov" => {
@@ -124,8 +126,7 @@ fn assemble_line(
     }
 }
 
-pub fn assemble(text: &str) -> Vec<u8> {
-    let mut result = vec![];
+pub fn assemble(text: &str) -> Vec<(String, Vec<u8>)> {
     let mut labels = HashMap::new();
 
     // First pass: Assemble instructions to bytes, but don't fill in the locations from the labels.
@@ -137,22 +138,30 @@ pub fn assemble(text: &str) -> Vec<u8> {
             AssemblyResult::Label(name) => {
                 labels.insert(name, location);
             }
+            AssemblyResult::Section(_) => {}
         };
     }
+
     // Second pass: Now that we know where the labels point to, assemble again.
-    location = 0;
+    let mut sections: Vec<(String, Vec<u8>)> = vec![];
+    let mut location = 0;
+    let mut i: i32 = -1;
     for line in text.lines() {
         match assemble_line(&line, location, &labels, true) {
             AssemblyResult::Bytes(bytes) => {
-                result.write(&bytes).unwrap();
+                sections[i as usize].1.write(&bytes).unwrap();
                 location += bytes.len() as u8;
                 ()
             }
             AssemblyResult::Label(_) => (),
+            AssemblyResult::Section(name) => {
+                sections.push((name, vec![]));
+                i += 1;
+            }
         };
     }
 
-    result
+    sections
 }
 
 #[cfg(test)]

@@ -18,25 +18,31 @@ struct Section {
     contents: Vec<u8>,
 }
 
-fn section_names_bytes(sections: Vec<&Section>) -> Vec<u8> {
+fn section_names_bytes(sections: &Vec<Section>) -> Vec<u8> {
     let section_names: Vec<String> = sections.iter().map(|s| format!("{}\0", s.name)).collect();
     let mut ret = section_names.join("").to_string().into_bytes();
     ret.insert(0, 0);
     ret
 }
 
-pub fn create_binary(instructions: Vec<u8>) -> std::io::Result<Vec<u8>> {
+pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::Result<Vec<u8>> {
     let start_address = 0x6000000;
     let header_size = 4 + 4 + 8 + 8 * 2 + 2 * 4 + 3 * 8;
     let pht_entry_size = 2 * 4 + 6 * 8;
     let sht_entry_size = 4 * 4 + 6 * 8;
 
-    let code_section = Section {
-        name: ".text".to_string(),
-        typ: 1,
-        flags: 6,
-        contents: instructions,
-    };
+    let mut sections = vec![];
+
+    for s in instruction_sections {
+        let flags = if s.0 == ".rodata" { 2 } else { 6 };
+        let section = Section {
+            name: s.0,
+            typ: 1,
+            flags: flags,
+            contents: s.1,
+        };
+        sections.push(section);
+    }
 
     let mut section_names_section = Section {
         name: ".shrtrtab".to_string(),
@@ -45,9 +51,9 @@ pub fn create_binary(instructions: Vec<u8>) -> std::io::Result<Vec<u8>> {
         contents: vec![],
     };
 
-    let section_names_bytes = section_names_bytes(vec![&code_section, &section_names_section]);
-    section_names_section.contents = section_names_bytes;
-    let sections = vec![code_section, section_names_section];
+    sections.push(section_names_section);
+    let i = sections.len() - 1;
+    sections[i].contents = section_names_bytes(&sections);
 
     let content_sizes: Vec<u64> = sections.iter().map(|s| s.contents.len() as u64).collect();
     let content_size: u64 = content_sizes.iter().sum();
