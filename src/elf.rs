@@ -1,4 +1,5 @@
 extern crate byteorder;
+use crate::*;
 use byteorder::{LittleEndian, WriteBytesExt};
 
 use std::io::prelude::*;
@@ -15,7 +16,7 @@ struct Section {
     name: String,
     typ: u32,
     flags: u64,
-    contents: Vec<u8>,
+    content: Vec<u8>,
     link: u32,
     entry_size: u64,
 }
@@ -58,7 +59,7 @@ struct Symbol {
     size: u64,
 }
 
-pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::Result<Vec<u8>> {
+pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     let start_address = 0x6000000;
     let header_size = 4 + 4 + 8 + 8 * 2 + 2 * 4 + 3 * 8;
     let pht_entry_size = 2 * 4 + 6 * 8;
@@ -66,13 +67,13 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
 
     let mut sections = vec![];
 
-    for s in instruction_sections {
-        let flags = if s.0 == ".rodata" { 2 } else { 6 };
+    for s in assembly.sections {
+        let flags = if s.name == ".rodata" { 2 } else { 6 };
         let section = Section {
-            name: s.0,
+            name: s.name,
             typ: 1,
             flags: flags,
-            contents: s.1,
+            content: s.content,
             link: 0,
             entry_size: 0,
         };
@@ -96,7 +97,7 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
         name: ".strtab".to_string(),
         typ: 3, // SHT_STRTAB
         flags: 0,
-        contents: string_bytes(&symbols),
+        content: string_bytes(&symbols),
         link: 0,
         entry_size: 0,
     };
@@ -106,7 +107,7 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
         name: ".symtab".to_string(),
         typ: 2, // SHT_SYMTAB
         flags: 0,
-        contents: symbol_bytes(&symbols),
+        content: symbol_bytes(&symbols),
         link: (sections.iter().position(|s| s.name == ".strtab").unwrap() + 1) as u32,
         entry_size: 24,
     };
@@ -116,16 +117,16 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
         name: ".shrtrtab".to_string(),
         typ: 3,
         flags: 0,
-        contents: vec![],
+        content: vec![],
         link: 0,
         entry_size: 0,
     };
 
     sections.push(section_names_section);
     let i = sections.len() - 1;
-    sections[i].contents = section_names_bytes(&sections);
+    sections[i].content = section_names_bytes(&sections);
 
-    let content_sizes: Vec<u64> = sections.iter().map(|s| s.contents.len() as u64).collect();
+    let content_sizes: Vec<u64> = sections.iter().map(|s| s.content.len() as u64).collect();
     let content_size: u64 = content_sizes.iter().sum();
 
     let main_segment = Segment {
@@ -231,9 +232,9 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
         buffer.write_u64::<LittleEndian>(0)?;
     }
 
-    // Contents.
+    // content.
     for section in &sections {
-        buffer.write(&section.contents)?;
+        buffer.write(&section.content)?;
     }
 
     // Beginning of section header table.
@@ -262,8 +263,8 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
         buffer.write_u64::<LittleEndian>(offset)?;
 
         // Size of this section in bytes.
-        offset += section.contents.len() as u64;
-        buffer.write_u64::<LittleEndian>(section.contents.len() as u64)?;
+        offset += section.content.len() as u64;
+        buffer.write_u64::<LittleEndian>(section.content.len() as u64)?;
 
         // Linked section. Interpretation depends on this section's type.
         buffer.write_u32::<LittleEndian>(section.link)?;
