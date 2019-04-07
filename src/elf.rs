@@ -16,6 +16,8 @@ struct Section {
     typ: u32,
     flags: u64,
     contents: Vec<u8>,
+    link: u32,
+    entry_size: u64,
 }
 
 fn section_names_bytes(sections: &Vec<Section>) -> Vec<u8> {
@@ -23,6 +25,37 @@ fn section_names_bytes(sections: &Vec<Section>) -> Vec<u8> {
     let mut ret = section_names.join("").to_string().into_bytes();
     ret.insert(0, 0);
     ret
+}
+
+fn string_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
+    let section_names: Vec<String> = symbols.iter().map(|s| format!("{}\0", s.name)).collect();
+    let mut ret = section_names.join("").to_string().into_bytes();
+    ret.insert(0, 0);
+    ret
+}
+
+fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
+    let mut ret = vec![];
+    let mut offset = 1;
+    for symbol in symbols {
+        ret.write_u32::<LittleEndian>(offset).unwrap();
+        offset += symbol.name.len() as u32 + 1;
+        ret.write(&[symbol.info]).unwrap();
+        ret.write(&[symbol.other]).unwrap();
+        ret.write_u16::<LittleEndian>(symbol.section).unwrap();
+        ret.write_u64::<LittleEndian>(symbol.value).unwrap();
+        ret.write_u64::<LittleEndian>(symbol.size).unwrap();
+    }
+    ret
+}
+
+struct Symbol {
+    name: String,
+    info: u8,
+    other: u8,
+    section: u16,
+    value: u64,
+    size: u64,
 }
 
 pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::Result<Vec<u8>> {
@@ -40,15 +73,52 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
             typ: 1,
             flags: flags,
             contents: s.1,
+            link: 0,
+            entry_size: 0,
         };
         sections.push(section);
     }
 
-    let mut section_names_section = Section {
+    let mut symbols = vec![];
+
+    let test_symbol = Symbol {
+        name: "test".to_string(),
+        info: 0,
+        other: 0,
+        section: 1,
+        value: 0x42,
+        size: 0x23,
+    };
+
+    symbols.push(test_symbol);
+
+    let string_table = Section {
+        name: ".strtab".to_string(),
+        typ: 3, // SHT_STRTAB
+        flags: 0,
+        contents: string_bytes(&symbols),
+        link: 0,
+        entry_size: 0,
+    };
+    sections.push(string_table);
+
+    let symbol_table = Section {
+        name: ".symtab".to_string(),
+        typ: 2, // SHT_SYMTAB
+        flags: 0,
+        contents: symbol_bytes(&symbols),
+        link: (sections.iter().position(|s| s.name == ".strtab").unwrap() + 1) as u32,
+        entry_size: 24,
+    };
+    sections.push(symbol_table);
+
+    let section_names_section = Section {
         name: ".shrtrtab".to_string(),
         typ: 3,
         flags: 0,
         contents: vec![],
+        link: 0,
+        entry_size: 0,
     };
 
     sections.push(section_names_section);
@@ -167,24 +237,45 @@ pub fn create_binary(instruction_sections: Vec<(String, Vec<u8>)>) -> std::io::R
     }
 
     // Beginning of section header table.
+
     let mut name_offset = 1;
     let mut offset = header_size + pht_entry_size * (segments.len() as u64);
 
-    buffer.write(&[0 as u8; 64]);
+    // First entry is filled with zeroes by convention.
+    buffer.write(&[0 as u8; 64]).unwrap();
 
     for section in &sections {
+        // Offset of this section's name in the string table this section links to.
         buffer.write_u32::<LittleEndian>(name_offset)?;
         name_offset += (section.name.len() + 1) as u32;
+
+        // Type. PROGBITS is 1, SYMTAB is 2, STRTAB is 3.
         buffer.write_u32::<LittleEndian>(section.typ)?;
+
+        // Flags, to mark if this section is writable or executable.
         buffer.write_u64::<LittleEndian>(section.flags)?;
+
+        // Address at which the first byte of this entry will be loaded.
         buffer.write_u64::<LittleEndian>(start_address + offset)?;
+
+        // Offset from the beginning of the file of this section.
         buffer.write_u64::<LittleEndian>(offset)?;
+
+        // Size of this section in bytes.
         offset += section.contents.len() as u64;
         buffer.write_u64::<LittleEndian>(section.contents.len() as u64)?;
+
+        // Linked section. Interpretation depends on this section's type.
+        buffer.write_u32::<LittleEndian>(section.link)?;
+
+        // Extra information. Interpretation depends on this section's type.
         buffer.write_u32::<LittleEndian>(0)?;
-        buffer.write_u32::<LittleEndian>(0)?;
+
+        // Alignment constraint.
         buffer.write_u64::<LittleEndian>(0)?;
-        buffer.write_u64::<LittleEndian>(0)?;
+
+        // Size of one entry, if this section contains fixed-size entries.
+        buffer.write_u64::<LittleEndian>(section.entry_size)?;
     }
 
     Ok(buffer)
