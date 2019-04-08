@@ -2,7 +2,6 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 fn main() -> std::io::Result<()> {
@@ -12,12 +11,12 @@ fn main() -> std::io::Result<()> {
     let sections = minitools::assembler::assemble(&assembly);
     let binary = minitools::elf::create_binary(sections)?;
 
-    let filename = Path::new(&args[1]).file_stem().unwrap();
-    let mut buffer = File::create(filename)?;
-
-    let mut perms = fs::metadata(filename)?.permissions();
-    perms.set_mode(perms.mode() | 0o700);
-    fs::set_permissions(filename, perms)?;
+    let filename = format!(
+        "{}.o",
+        Path::new(&args[1]).file_stem().unwrap().to_str().unwrap()
+    )
+    .to_string();
+    let mut buffer = File::create(&filename)?;
 
     buffer.write(&binary)?;
     Ok(())
