@@ -9,6 +9,13 @@ enum AssemblyLineResult {
     Bytes(Vec<u8>),
     Label(String),
     Section(String),
+    Relocation(Relocation),
+}
+
+pub struct Relocation {
+    typ: RelocationType,
+    label: String,
+    location: u64,
 }
 
 fn register_offset(reg: &str) -> u8 {
@@ -25,63 +32,49 @@ fn to_u32(str: &str) -> u32 {
     }
 }
 
-fn call(
-    arguments: Vec<&str>,
-    location: u8,
-    labels: &HashMap<String, u8>,
-    panic_on_missing_label: bool,
-) -> AssemblyLineResult {
-    let label = arguments[0];
-    if panic_on_missing_label {
-        let label_location = labels.get(label).expect("Label not defined");
-        let jump_target = (*label_location as i32 - (location as i32 + 5)) as u32;
-        let mut ret = vec![0xe8];
-        ret.write_u32::<LittleEndian>(jump_target).unwrap();
-        AssemblyLineResult::Bytes(ret)
-    } else {
-        AssemblyLineResult::Bytes(vec![0xe8, 0, 0, 0, 0])
-    }
-}
+//fn call(arguments: Vec<&str>, location: u64) -> Vec<AssemblyLineResult> {
+//    let label = arguments[0];
+//    if panic_on_missing_label {
+//        let label_location = labels.get(label).expect("Label not defined");
+//        let jump_target = (*label_location as i32 - (location as i32 + 5)) as u32;
+//        let mut ret = vec![0xe8];
+//        ret.write_u32::<LittleEndian>(jump_target).unwrap();
+//        vec![AssemblyLineResult::Bytes(ret)]
+//    } else {
+//        vec![AssemblyLineResult::Bytes(vec![0xe8, 0, 0, 0, 0])]
+//    }
+//}
+//
+//fn jmp(opcode: u8, arguments: Vec<&str>, location: u64) -> Vec<AssemblyLineResult> {
+//    let label = arguments[0];
+//    if panic_on_missing_label {
+//        let label_location = labels.get(label).expect("Label not defined");
+//        let jump_target = (*label_location as i8 - (location as i8 + 2)) as u64;
+//        vec![AssemblyLineResult::Bytes(vec![opcode, jump_target as u8])]
+//    } else {
+//        vec![AssemblyLineResult::Bytes(vec![opcode, 0])]
+//    }
+//}
 
-fn jmp(
-    opcode: u8,
-    arguments: Vec<&str>,
-    location: u8,
-    labels: &HashMap<String, u8>,
-    panic_on_missing_label: bool,
-) -> AssemblyLineResult {
-    let label = arguments[0];
-    if panic_on_missing_label {
-        let label_location = labels.get(label).expect("Label not defined");
-        let jump_target = (*label_location as i8 - (location as i8 + 2)) as u8;
-        AssemblyLineResult::Bytes(vec![opcode, jump_target])
-    } else {
-        AssemblyLineResult::Bytes(vec![opcode, 0])
-    }
-}
-
-fn assemble_line(
-    line: &str,
-    location: u8,
-    labels: &HashMap<String, u8>,
-    panic_on_missing_label: bool,
-) -> AssemblyLineResult {
+fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
     if line.trim().len() == 0 {
-        return AssemblyLineResult::Bytes(vec![]);
+        return vec![];
     }
 
     let mut parts = line.trim().splitn(2, " ");
     let op = parts.next().unwrap().trim();
 
     if op.chars().last().unwrap() == ':' {
-        AssemblyLineResult::Label(op.trim_right_matches(":").to_string())
+        vec![AssemblyLineResult::Label(
+            op.trim_right_matches(":").to_string(),
+        )]
     } else {
         let mut arguments: Vec<&str> = parts.next().unwrap_or("").split(",").collect();
         arguments = arguments.iter().map(|a| a.trim()).collect();
         match op {
-            "section" => AssemblyLineResult::Section(arguments[0].to_string()),
-            "syscall" => AssemblyLineResult::Bytes(vec![0xf, 0x5]),
-            "ret" => AssemblyLineResult::Bytes(vec![0xc3]),
+            "section" => vec![AssemblyLineResult::Section(arguments[0].to_string())],
+            "syscall" => vec![AssemblyLineResult::Bytes(vec![0xf, 0x5])],
+            "ret" => vec![AssemblyLineResult::Bytes(vec![0xc3])],
             "mov" => {
                 let target = arguments[0];
                 let source = arguments[1];
@@ -90,25 +83,30 @@ fn assemble_line(
                 if source.chars().next().unwrap().is_digit(10) {
                     let value = to_u32(source);
                     ret.write_u32::<LittleEndian>(value).unwrap();
+                    vec![AssemblyLineResult::Bytes(ret)]
                 } else {
-                    let label_location = labels.get(source).expect("Label not defined");
-                    ret.write_u32::<LittleEndian>(*label_location as u32)
-                        .unwrap();
+                    vec![
+                        AssemblyLineResult::Bytes(ret),
+                        AssemblyLineResult::Relocation(Relocation {
+                            typ: RelocationType::U32,
+                            label: source.to_string(),
+                            location: location + 1,
+                        }),
+                    ]
                 }
-                AssemblyLineResult::Bytes(ret)
             }
-            "jmp" => jmp(0xeb, arguments, location, labels, panic_on_missing_label),
-            "je" => jmp(0x74, arguments, location, labels, panic_on_missing_label),
-            "jg" => jmp(0x7f, arguments, location, labels, panic_on_missing_label),
-            "jl" => jmp(0x7c, arguments, location, labels, panic_on_missing_label),
-            "jle" => jmp(0x7e, arguments, location, labels, panic_on_missing_label),
+            //"jmp" => jmp(0xeb, arguments, location),
+            //"je" => jmp(0x74, arguments, location),
+            //"jg" => jmp(0x7f, arguments, location),
+            //"jl" => jmp(0x7c, arguments, location),
+            //"jle" => jmp(0x7e, arguments, location),
             "cmp" => {
                 let target = arguments[0];
                 let value = to_u32(arguments[1]) as u8;
                 let modrm = 0xf8 + register_offset(target);
-                AssemblyLineResult::Bytes(vec![0x83, modrm, value])
+                vec![AssemblyLineResult::Bytes(vec![0x83, modrm, value])]
             }
-            "call" => call(arguments, location, labels, panic_on_missing_label),
+            //"call" => call(arguments, location),
             "db" => {
                 let mut ret = vec![];
                 for arg in &arguments {
@@ -120,7 +118,7 @@ fn assemble_line(
                         ret.push(to_u32(arg) as u8);
                     }
                 }
-                AssemblyLineResult::Bytes(ret)
+                vec![AssemblyLineResult::Bytes(ret)]
             }
             _ => panic!("Not implemented"),
         }
@@ -128,44 +126,67 @@ fn assemble_line(
 }
 
 pub fn assemble(text: &str) -> AssemblyResult {
-    let mut labels = HashMap::new();
+    let mut labels: HashMap<String, (String, u64)> = HashMap::new();
 
-    // First pass: Assemble instructions to bytes, but don't fill in the locations from the labels.
-    let empty = HashMap::new();
-    let mut location: u8 = 0;
-    for line in text.lines() {
-        match assemble_line(&line, location, &empty, false) {
-            AssemblyLineResult::Bytes(bytes) => location += bytes.len() as u8,
-            AssemblyLineResult::Label(name) => {
-                labels.insert(name, location);
-            }
-            AssemblyLineResult::Section(_) => {}
-        };
-    }
-
-    // Second pass: Now that we know where the labels point to, assemble again.
     let mut sections: Vec<AssemblySection> = vec![];
-    let mut location = 0;
+    let mut relocations: Vec<Relocation> = vec![];
+    let mut location: u64 = 0;
     let mut i: i32 = -1;
     for line in text.lines() {
-        match assemble_line(&line, location, &labels, true) {
-            AssemblyLineResult::Bytes(bytes) => {
-                sections[i as usize].content.write(&bytes).unwrap();
-                location += bytes.len() as u8;
-                ()
+        for result in assemble_line(&line, location) {
+            match result {
+                AssemblyLineResult::Bytes(bytes) => {
+                    sections[i as usize].content.write(&bytes).unwrap();
+                    location += bytes.len() as u64;
+                    ()
+                }
+                AssemblyLineResult::Label(name) => {
+                    labels.insert(name, (sections[sections.len() - 1].name.clone(), location));
+                    ()
+                }
+                AssemblyLineResult::Section(name) => {
+                    sections.push(AssemblySection {
+                        name: name,
+                        content: vec![],
+                    });
+                    i += 1;
+                    location = 0;
+                }
+                AssemblyLineResult::Relocation(relocation) => {
+                    match relocation.typ {
+                        RelocationType::U32 => {
+                            sections[i as usize].content.write(&[0 as u8; 4]).unwrap();
+                            location += 4 as u64;
+                        }
+                        RelocationType::U64 => {
+                            sections[i as usize].content.write(&[0 as u8; 8]).unwrap();
+                            location += 8 as u64;
+                        }
+                    }
+                    relocations.push(relocation);
+                }
             }
-            AssemblyLineResult::Label(_) => (),
-            AssemblyLineResult::Section(name) => {
-                sections.push(AssemblySection {
-                    name: name,
-                    content: vec![],
-                });
-                i += 1;
-            }
-        };
+        }
     }
 
-    AssemblyResult { sections: sections }
+    // Resolve relocations.
+    let mut resolved_relocations = vec![];
+    for relocation in relocations {
+        let (section, addend) = labels
+            .get(&relocation.label)
+            .expect("Could not resolve label");
+        resolved_relocations.push(ResolvedRelocation {
+            location: relocation.location,
+            typ: relocation.typ,
+            section: section.to_string(),
+            addend: *addend,
+        });
+    }
+
+    AssemblyResult {
+        sections: sections,
+        relocations: resolved_relocations,
+    }
 }
 
 #[cfg(test)]
@@ -173,7 +194,8 @@ mod tests {
     use super::*;
 
     fn assert_assembly(line: &str, expected: Vec<u8>) {
-        let assembly = match assemble_line(line, 0, &HashMap::new(), false) {
+        let result = assemble_line(line, 0).remove(0);
+        let assembly = match result {
             AssemblyLineResult::Bytes(bytes) => bytes,
             _ => panic!("Unexpected AssemblyLineResult type"),
         };
@@ -202,6 +224,17 @@ mod tests {
         assert_assembly("mov eax, 60", vec![0xb8, 0x3c, 0, 0, 0]);
         assert_assembly("mov ebx, 0x42", vec![0xbb, 0x42, 0, 0, 0]);
         assert_assembly("mov ebx, 0x12345678", vec![0xbb, 0x78, 0x56, 0x34, 0x12]);
+    }
+
+    #[test]
+    fn mov_with_reference() {
+        let result =
+            assemble("section .text\nmov esi, message\nsection .rodata\nmessage:\ndb \"Hello\"");
+        assert_eq!(result.sections[0].name, ".text");
+        assert_eq!(result.sections[1].name, ".rodata");
+        assert_eq!(result.sections[0].content, vec![0xb8 + 6, 0, 0, 0, 0]);
+        assert_eq!(result.relocations[0].section, ".rodata");
+        assert_eq!(result.relocations[0].location, 1);
     }
 
     //#[test]

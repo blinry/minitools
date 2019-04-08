@@ -63,6 +63,31 @@ fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
     ret
 }
 
+fn relocation_bytes(relocations: &Vec<ResolvedRelocation>, sections: &Vec<Section>) -> Vec<u8> {
+    let mut ret = vec![];
+    for relocation in relocations {
+        // The location at which to apply the relocation action, relative to the beginning of the
+        // section referenced by the relocation section.
+        ret.write_u64::<LittleEndian>(relocation.location).unwrap();
+
+        // Info field, which contains both the index of the symbol we're referring to, as well as
+        // the type of the relocation.
+        let symbol = sections
+            .iter()
+            .position(|s| s.name == relocation.section)
+            .unwrap()
+            + 1;
+
+        ret.write_u32::<LittleEndian>(relocation.typ as u32)
+            .unwrap();
+        ret.write_u32::<LittleEndian>(symbol as u32).unwrap();
+
+        // Addend, relative to the referenced symbol.
+        ret.write_u64::<LittleEndian>(relocation.addend).unwrap();
+    }
+    ret
+}
+
 struct Symbol {
     name: String,
     typ_and_binding: u8,
@@ -73,20 +98,20 @@ struct Symbol {
 }
 
 pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
-    let start_address = 0x6000000;
+    let start_address = 0;
     let header_size = 4 + 4 + 8 + 8 * 2 + 2 * 4 + 3 * 8;
     let pht_entry_size = 2 * 4 + 6 * 8;
     let sht_entry_size = 4 * 4 + 6 * 8;
 
     let mut sections = vec![];
 
-    for s in assembly.sections {
+    for s in &assembly.sections {
         let flags = if s.name == ".rodata" { 2 } else { 6 };
         let section = Section {
-            name: s.name,
+            name: s.name.clone(),
             typ: 1,
             flags: flags,
-            content: s.content,
+            content: s.content.clone(),
             link: 0,
             info: 0,
             entry_size: 0,
@@ -96,16 +121,20 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
 
     let mut symbols = vec![];
 
-    let test_symbol = Symbol {
-        name: "test".to_string(),
-        typ_and_binding: (1 << 4) | 1, // GLOBAL, OBJECT
-        visibility: 0,
-        section: 1,
-        value: start_address + 0x42,
-        size: 0,
-    };
+    let mut index = 1;
+    for section in &assembly.sections {
+        let text_section_symbol = Symbol {
+            name: section.name.clone(),
+            typ_and_binding: (0 << 4) | 3, // GLOBAL, SECTION
+            visibility: 0,
+            section: index,
+            value: 0,
+            size: 0,
+        };
+        index += 1;
 
-    symbols.push(test_symbol);
+        symbols.push(text_section_symbol);
+    }
 
     let string_table = Section {
         name: ".strtab".to_string(),
@@ -126,10 +155,21 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         link: (sections.iter().position(|s| s.name == ".strtab").unwrap() + 1) as u32,
         // FIXME, actually "one greater than the symbol table index of the last local symbol"
         // http://refspecs.linuxbase.org/elf/gabi4+/ch4.sheader.html#sh_link
-        info: (sections.iter().position(|s| s.name == ".text").unwrap() + 1) as u32,
+        info: (symbols.len() + 1) as u32,
         entry_size: 24,
     };
     sections.push(symbol_table);
+
+    let relocation_table = Section {
+        name: ".rela.text".to_string(),
+        typ: 4, // SHT_RELA
+        flags: 0,
+        content: relocation_bytes(&assembly.relocations, &sections),
+        link: (sections.iter().position(|s| s.name == ".symtab").unwrap() + 1) as u32,
+        info: (sections.iter().position(|s| s.name == ".text").unwrap() + 1) as u32,
+        entry_size: 24,
+    };
+    sections.push(relocation_table);
 
     let section_names_section = Section {
         name: ".shrtrtab".to_string(),
@@ -189,10 +229,8 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     // Always set to 1?
     buffer.write_u32::<LittleEndian>(1)?;
 
-    // Address of the entry point.
-    buffer.write_u64::<LittleEndian>(
-        start_address + header_size + pht_entry_size * (segments.len() as u64),
-    )?;
+    // Address of the entry point. For object files, this is 0.
+    buffer.write_u64::<LittleEndian>(0)?;
 
     // Start of the program header table.
     buffer.write_u64::<LittleEndian>(header_size)?;
@@ -276,7 +314,8 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         buffer.write_u64::<LittleEndian>(section.flags)?;
 
         // Address at which the first byte of this entry will be loaded.
-        buffer.write_u64::<LittleEndian>(start_address + offset)?;
+        // For object files, this is 0?
+        buffer.write_u64::<LittleEndian>(0)?;
 
         // Offset from the beginning of the file of this section.
         buffer.write_u64::<LittleEndian>(offset)?;
