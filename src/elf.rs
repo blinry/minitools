@@ -18,6 +18,7 @@ struct Section {
     flags: u64,
     content: Vec<u8>,
     link: u32,
+    info: u32,
     entry_size: u64,
 }
 
@@ -38,13 +39,25 @@ fn string_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
 fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
     let mut ret = vec![];
     let mut offset = 1;
+    ret.write(&[0 as u8; 24]).unwrap();
     for symbol in symbols {
+        // Offset of this symbol's name in the string table this section links to.
         ret.write_u32::<LittleEndian>(offset).unwrap();
         offset += symbol.name.len() as u32 + 1;
-        ret.write(&[symbol.info]).unwrap();
-        ret.write(&[symbol.other]).unwrap();
+
+        // Symbol type and binding attributes.
+        ret.write(&[symbol.typ_and_binding]).unwrap();
+
+        // Symbol visibility.
+        ret.write(&[symbol.visibility]).unwrap();
+
+        // Index of the section this symbol is defined in relation to.
         ret.write_u16::<LittleEndian>(symbol.section).unwrap();
+
+        // Value of the symbol.
         ret.write_u64::<LittleEndian>(symbol.value).unwrap();
+
+        // Size of the symbol.
         ret.write_u64::<LittleEndian>(symbol.size).unwrap();
     }
     ret
@@ -52,8 +65,8 @@ fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
 
 struct Symbol {
     name: String,
-    info: u8,
-    other: u8,
+    typ_and_binding: u8,
+    visibility: u8,
     section: u16,
     value: u64,
     size: u64,
@@ -75,6 +88,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
             flags: flags,
             content: s.content,
             link: 0,
+            info: 0,
             entry_size: 0,
         };
         sections.push(section);
@@ -84,11 +98,11 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
 
     let test_symbol = Symbol {
         name: "test".to_string(),
-        info: 0,
-        other: 0,
+        typ_and_binding: (1 << 4) | 1, // GLOBAL, OBJECT
+        visibility: 0,
         section: 1,
-        value: 0x42,
-        size: 0x23,
+        value: start_address + 0x42,
+        size: 0,
     };
 
     symbols.push(test_symbol);
@@ -99,6 +113,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         flags: 0,
         content: string_bytes(&symbols),
         link: 0,
+        info: 0,
         entry_size: 0,
     };
     sections.push(string_table);
@@ -109,6 +124,9 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         flags: 0,
         content: symbol_bytes(&symbols),
         link: (sections.iter().position(|s| s.name == ".strtab").unwrap() + 1) as u32,
+        // FIXME, actually "one greater than the symbol table index of the last local symbol"
+        // http://refspecs.linuxbase.org/elf/gabi4+/ch4.sheader.html#sh_link
+        info: (sections.iter().position(|s| s.name == ".text").unwrap() + 1) as u32,
         entry_size: 24,
     };
     sections.push(symbol_table);
@@ -119,6 +137,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         flags: 0,
         content: vec![],
         link: 0,
+        info: 0,
         entry_size: 0,
     };
 
@@ -246,7 +265,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     buffer.write(&[0 as u8; 64]).unwrap();
 
     for section in &sections {
-        // Offset of this section's name in the string table this section links to.
+        // Offset of this section's name in the .shrtrtab section.
         buffer.write_u32::<LittleEndian>(name_offset)?;
         name_offset += (section.name.len() + 1) as u32;
 
@@ -270,7 +289,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         buffer.write_u32::<LittleEndian>(section.link)?;
 
         // Extra information. Interpretation depends on this section's type.
-        buffer.write_u32::<LittleEndian>(0)?;
+        buffer.write_u32::<LittleEndian>(section.info)?;
 
         // Alignment constraint.
         buffer.write_u64::<LittleEndian>(0)?;
