@@ -88,6 +88,11 @@ fn relocation_bytes(relocations: &Vec<ResolvedRelocation>, sections: &Vec<Sectio
     ret
 }
 
+fn alignment_from_section_name(_name: &str) -> u64 {
+    // I don't know whether these are actually required, so let's just set this to 0.
+    0
+}
+
 struct Symbol {
     name: String,
     typ_and_binding: u8,
@@ -98,7 +103,6 @@ struct Symbol {
 }
 
 pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
-    let start_address = 0;
     let header_size = 4 + 4 + 8 + 8 * 2 + 2 * 4 + 3 * 8;
     let pht_entry_size = 2 * 4 + 6 * 8;
     let sht_entry_size = 4 * 4 + 6 * 8;
@@ -125,7 +129,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     for section in &assembly.sections {
         let text_section_symbol = Symbol {
             name: section.name.clone(),
-            typ_and_binding: (0 << 4) | 3, // GLOBAL, SECTION
+            typ_and_binding: (0 << 4) | 3, // LOCAL, SECTION
             visibility: 0,
             section: index,
             value: 0,
@@ -135,6 +139,26 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
 
         symbols.push(text_section_symbol);
     }
+
+    let start_symbol = Symbol {
+        name: "_start".to_string(),
+        typ_and_binding: (1 << 4) | 0, // GLOBAL, NO_TYPE
+        visibility: 0,
+        section: (sections.iter().position(|s| s.name == ".text").unwrap() + 1) as u16,
+        value: 0,
+        size: 0,
+    };
+    symbols.push(start_symbol);
+
+    let start_symbol2 = Symbol {
+        name: "foobar".to_string(),
+        typ_and_binding: (1 << 4) | 0, // GLOBAL, NO_TYPE
+        visibility: 0,
+        section: (sections.iter().position(|s| s.name == ".rodata").unwrap() + 1) as u16,
+        value: 0,
+        size: 0,
+    };
+    symbols.push(start_symbol2);
 
     let string_table = Section {
         name: ".strtab".to_string(),
@@ -172,7 +196,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     sections.push(relocation_table);
 
     let section_names_section = Section {
-        name: ".shrtrtab".to_string(),
+        name: ".shstrtab".to_string(),
         typ: 3,
         flags: 0,
         content: vec![],
@@ -180,23 +204,15 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         info: 0,
         entry_size: 0,
     };
-
     sections.push(section_names_section);
+
     let i = sections.len() - 1;
     sections[i].content = section_names_bytes(&sections);
 
     let content_sizes: Vec<u64> = sections.iter().map(|s| s.content.len() as u64).collect();
     let content_size: u64 = content_sizes.iter().sum();
 
-    let main_segment = Segment {
-        typ: 1,
-        flags: 5,
-        offset: 0,
-        address: start_address,
-        size: header_size + pht_entry_size + content_size as u64,
-    };
-
-    let segments = vec![main_segment];
+    let segments: Vec<Segment> = vec![];
 
     let mut buffer = vec![];
 
@@ -232,8 +248,8 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     // Address of the entry point. For object files, this is 0.
     buffer.write_u64::<LittleEndian>(0)?;
 
-    // Start of the program header table.
-    buffer.write_u64::<LittleEndian>(header_size)?;
+    // Start of the program header table. We don't need it in an object file.
+    buffer.write_u64::<LittleEndian>(0)?;
 
     // Start of the section header table.
     buffer.write_u64::<LittleEndian>(
@@ -247,7 +263,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     buffer.write_u16::<LittleEndian>(header_size as u16)?;
 
     // Size of a program header table entry.
-    buffer.write_u16::<LittleEndian>(pht_entry_size as u16)?;
+    buffer.write_u16::<LittleEndian>(0)?;
 
     // Number of entries in the program header table.
     buffer.write_u16::<LittleEndian>(segments.len() as u16)?;
@@ -331,7 +347,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         buffer.write_u32::<LittleEndian>(section.info)?;
 
         // Alignment constraint.
-        buffer.write_u64::<LittleEndian>(0)?;
+        buffer.write_u64::<LittleEndian>(alignment_from_section_name(&section.name))?;
 
         // Size of one entry, if this section contains fixed-size entries.
         buffer.write_u64::<LittleEndian>(section.entry_size)?;
