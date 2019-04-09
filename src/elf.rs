@@ -179,7 +179,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         link: (sections.iter().position(|s| s.name == ".strtab").unwrap() + 1) as u32,
         // FIXME, actually "one greater than the symbol table index of the last local symbol"
         // http://refspecs.linuxbase.org/elf/gabi4+/ch4.sheader.html#sh_link
-        info: (symbols.len() + 1) as u32,
+        info: (assembly.sections.len() + 1) as u32,
         entry_size: 24,
     };
     sections.push(symbol_table);
