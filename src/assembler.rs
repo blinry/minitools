@@ -23,12 +23,35 @@ fn register_offset(reg: &str) -> u8 {
     offsets.iter().position(|&r| r == reg).unwrap() as u8
 }
 
-fn to_u32(str: &str) -> u32 {
+fn to_uint<T: HexAndDecimalConvertable>(str: &str) -> T {
     let s = str.trim();
     if s.len() > 1 && &s[0..2] == "0x" {
-        u32::from_str_radix(s.trim_left_matches("0x"), 16).unwrap()
+        T::from_hex_str(s.trim_left_matches("0x")).unwrap()
     } else {
-        s.parse::<u32>().unwrap()
+        T::parse_decimal(s).unwrap()
+    }
+}
+
+trait HexAndDecimalConvertable: Sized {
+    fn from_hex_str(s: &str) -> Result<Self, &'static str>;
+    fn parse_decimal(s: &str) -> Result<Self, &'static str>;
+}
+
+impl HexAndDecimalConvertable for u8 {
+    fn from_hex_str(s: &str) -> Result<Self, &'static str> {
+        u8::from_str_radix(s, 16).map_err(|_| "from_str_radix failed :(")
+    }
+    fn parse_decimal(s: &str) -> Result<Self, &'static str> {
+        s.parse().map_err(|_| "u8::parse failed")
+    }
+}
+
+impl HexAndDecimalConvertable for u32 {
+    fn from_hex_str(s: &str) -> Result<Self, &'static str> {
+        u32::from_str_radix(s, 16).map_err(|_| "from_str_radix failed :(")
+    }
+    fn parse_decimal(s: &str) -> Result<Self, &'static str> {
+        s.parse().map_err(|_| "u32::parse failed")
     }
 }
 
@@ -81,7 +104,7 @@ fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
                 let opcode = 0xb8 + register_offset(target);
                 let mut ret = vec![opcode];
                 if source.chars().next().unwrap().is_digit(10) {
-                    let value = to_u32(source);
+                    let value: u32 = to_uint(source);
                     ret.write_u32::<LittleEndian>(value).unwrap();
                     vec![AssemblyLineResult::Bytes(ret)]
                 } else {
@@ -102,7 +125,7 @@ fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
             //"jle" => jmp(0x7e, arguments, location),
             "cmp" => {
                 let target = arguments[0];
-                let value = to_u32(arguments[1]) as u8;
+                let value = to_uint::<u8>(arguments[1]);
                 let modrm = 0xf8 + register_offset(target);
                 vec![AssemblyLineResult::Bytes(vec![0x83, modrm, value])]
             }
@@ -110,12 +133,10 @@ fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
             "db" => {
                 let mut ret = vec![];
                 for arg in &arguments {
-                    if arg.chars().next().unwrap() == '"' {
-                        for char in arg.trim_left_matches("\"").trim_right_matches("\"").chars() {
-                            ret.push(char as u8);
-                        }
+                    if arg.as_bytes().first() == Some(&b'"') {
+                        ret.extend_from_slice(arg.trim_matches('"').as_bytes());
                     } else {
-                        ret.push(to_u32(arg) as u8);
+                        ret.push(to_uint(arg));
                     }
                 }
                 vec![AssemblyLineResult::Bytes(ret)]
@@ -205,9 +226,10 @@ mod tests {
 
     #[test]
     fn conversion() {
-        assert_eq!(to_u32("0x42"), 66);
-        assert_eq!(to_u32("42"), 42);
-        assert_eq!(to_u32("0x0"), 0);
+        assert_eq!(to_uint::<u32>("0x42"), 66);
+        assert_eq!(to_uint::<u32>("42"), 42);
+        assert_eq!(to_uint::<u32>("0x0"), 0);
+        assert_eq!(to_uint::<u8>("0x0"), 0);
     }
 
     #[test]
