@@ -8,8 +8,8 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let assembly = fs::read_to_string(&args[1])?;
 
-    let sections = minitools::assembler::assemble(&assembly);
-    let binary = minitools::elf::create_binary(sections)?;
+    let result = minitools::assembler::assemble(&assembly);
+    let binary = minitools::elf::create_binary(result)?;
 
     let filename = format!(
         "{}.o",

@@ -126,6 +126,7 @@ fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
 }
 
 pub fn assemble(text: &str) -> AssemblyResult {
+    // A label has a name, a section name, and a location relative to that section.
     let mut labels: HashMap<String, (String, u64)> = HashMap::new();
 
     let mut sections: Vec<AssemblySection> = vec![];
