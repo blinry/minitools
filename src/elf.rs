@@ -22,34 +22,34 @@ struct Section {
     entry_size: u64,
 }
 
-fn section_names_bytes(sections: &Vec<Section>) -> Vec<u8> {
+fn section_names_bytes(sections: &[Section]) -> Vec<u8> {
     let section_names: Vec<String> = sections.iter().map(|s| format!("{}\0", s.name)).collect();
-    let mut ret = section_names.join("").to_string().into_bytes();
+    let mut ret = section_names.join("").into_bytes();
     ret.insert(0, 0);
     ret
 }
 
-fn string_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
+fn string_bytes(symbols: &[Symbol]) -> Vec<u8> {
     let section_names: Vec<String> = symbols.iter().map(|s| format!("{}\0", s.name)).collect();
-    let mut ret = section_names.join("").to_string().into_bytes();
+    let mut ret = section_names.join("").into_bytes();
     ret.insert(0, 0);
     ret
 }
 
-fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
+fn symbol_bytes(symbols: &[Symbol]) -> Vec<u8> {
     let mut ret = vec![];
     let mut offset = 1;
-    ret.write(&[0 as u8; 24]).unwrap();
+    ret.write_all(&[0 as u8; 24]).unwrap();
     for symbol in symbols {
         // Offset of this symbol's name in the string table this section links to.
         ret.write_u32::<LittleEndian>(offset).unwrap();
         offset += symbol.name.len() as u32 + 1;
 
         // Symbol type and binding attributes.
-        ret.write(&[symbol.typ_and_binding]).unwrap();
+        ret.write_all(&[symbol.typ_and_binding]).unwrap();
 
         // Symbol visibility.
-        ret.write(&[symbol.visibility]).unwrap();
+        ret.write_all(&[symbol.visibility]).unwrap();
 
         // Index of the section this symbol is defined in relation to.
         ret.write_u16::<LittleEndian>(symbol.section).unwrap();
@@ -63,7 +63,7 @@ fn symbol_bytes(symbols: &Vec<Symbol>) -> Vec<u8> {
     ret
 }
 
-fn relocation_bytes(relocations: &Vec<ResolvedRelocation>, sections: &Vec<Section>) -> Vec<u8> {
+fn relocation_bytes(relocations: &[ResolvedRelocation], sections: &[Section]) -> Vec<u8> {
     let mut ret = vec![];
     for relocation in relocations {
         // The location at which to apply the relocation action, relative to the beginning of the
@@ -114,7 +114,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
         let section = Section {
             name: s.name.clone(),
             typ: 1,
-            flags: flags,
+            flags,
             content: s.content.clone(),
             link: 0,
             info: 0,
@@ -217,22 +217,21 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     let mut buffer = vec![];
 
     // Magic number: 0x7F plus "ELF".
-    buffer.write(&[0x7f, 'E' as u8, 'L' as u8, 'F' as u8])?;
 
     // 32-bit format (1) or 64-bit format (2).
-    buffer.write(&[2])?;
+    buffer.write_all(&[2])?;
 
     // Little endian (1) or big endian (2).
-    buffer.write(&[1])?;
+    buffer.write_all(&[1])?;
 
     // ELF version. Original and curent version is 1.
-    buffer.write(&[1])?;
+    buffer.write_all(&[1])?;
 
     // Target OS ABI. Linux is 3, but it's often set to 0, regardless of platform.
-    buffer.write(&[0])?;
+    buffer.write_all(&[0])?;
 
     // Padding.
-    buffer.write(&[0; 8])?;
+    buffer.write_all(&[0; 8])?;
 
     // Starting here, endianess goes into effect!
 
@@ -307,7 +306,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
 
     // content.
     for section in &sections {
-        buffer.write(&section.content)?;
+        buffer.write_all(&section.content)?;
     }
 
     // Beginning of section header table.
@@ -316,7 +315,7 @@ pub fn create_binary(assembly: AssemblyResult) -> std::io::Result<Vec<u8>> {
     let mut offset = header_size + pht_entry_size * (segments.len() as u64);
 
     // First entry is filled with zeroes by convention.
-    buffer.write(&[0 as u8; 64]).unwrap();
+    buffer.write_all(&[0 as u8; 64]).unwrap();
 
     for section in &sections {
         // Offset of this section's name in the .shrtrtab section.

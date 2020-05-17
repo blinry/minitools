@@ -17,7 +17,7 @@ fn main() -> std::io::Result<()> {
         let readline = rl.readline(">> ");
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_ref());
+                rl.add_history_entry(line.as_str());
 
                 let mut file = NamedTempFile::new()?;
                 let file2 = NamedTempFile::new()?;
@@ -33,7 +33,7 @@ fn main() -> std::io::Result<()> {
                 print!("{}", std::str::from_utf8(&output.stdout).unwrap());
                 print!("{}", std::str::from_utf8(&output.stderr).unwrap());
 
-                if output.stderr.len() == 0 {
+                if output.stderr.is_empty() {
                     let bytes = std::fs::read(file2.path())?;
                     for byte in &bytes {
                         print!("{:02x} ", byte);

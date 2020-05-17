@@ -6,8 +6,8 @@ edition = "2018"
 
 [dependencies]
 byteorder = "1"
-rustyline = "3.0.0"
-tempfile = "3.0.7"
+rustyline = "6"
+tempfile = "3"
 
 [lib]
 name = "minitools"

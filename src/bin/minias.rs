@@ -14,10 +14,9 @@ fn main() -> std::io::Result<()> {
     let filename = format!(
         "{}.o",
         Path::new(&args[1]).file_stem().unwrap().to_str().unwrap()
-    )
-    .to_string();
+    );
     let mut buffer = File::create(&filename)?;
 
-    buffer.write(&binary)?;
+    buffer.write_all(&binary)?;
     Ok(())
 }

@@ -26,7 +26,7 @@ fn register_offset(reg: &str) -> u8 {
 fn to_uint<T: HexAndDecimalConvertable>(str: &str) -> T {
     let s = str.trim();
     if s.len() > 1 && &s[0..2] == "0x" {
-        T::from_hex_str(s.trim_left_matches("0x")).unwrap()
+        T::from_hex_str(s.trim_start_matches("0x")).unwrap()
     } else {
         T::parse_decimal(s).unwrap()
     }
@@ -80,19 +80,19 @@ impl HexAndDecimalConvertable for u32 {
 //}
 
 fn assemble_line(line: &str, location: u64) -> Vec<AssemblyLineResult> {
-    if line.trim().len() == 0 {
+    if line.trim().is_empty() {
         return vec![];
     }
 
-    let mut parts = line.trim().splitn(2, " ");
+    let mut parts = line.trim().splitn(2, ' ');
     let op = parts.next().unwrap().trim();
 
-    if op.chars().last().unwrap() == ':' {
+    if op.ends_with(':') {
         vec![AssemblyLineResult::Label(
-            op.trim_right_matches(":").to_string(),
+            op.trim_end_matches(':').to_string(),
         )]
     } else {
-        let mut arguments: Vec<&str> = parts.next().unwrap_or("").split(",").collect();
+        let mut arguments: Vec<&str> = parts.next().unwrap_or("").split(',').collect();
         arguments = arguments.iter().map(|a| a.trim()).collect();
         match op {
             "section" => vec![AssemblyLineResult::Section(arguments[0].to_string())],
@@ -158,17 +158,15 @@ pub fn assemble(text: &str) -> AssemblyResult {
         for result in assemble_line(&line, location) {
             match result {
                 AssemblyLineResult::Bytes(bytes) => {
-                    sections[i as usize].content.write(&bytes).unwrap();
+                    sections[i as usize].content.write_all(&bytes).unwrap();
                     location += bytes.len() as u64;
-                    ()
                 }
                 AssemblyLineResult::Label(name) => {
                     labels.insert(name, (sections[sections.len() - 1].name.clone(), location));
-                    ()
                 }
                 AssemblyLineResult::Section(name) => {
                     sections.push(AssemblySection {
-                        name: name,
+                        name,
                         content: vec![],
                     });
                     i += 1;
@@ -177,11 +175,17 @@ pub fn assemble(text: &str) -> AssemblyResult {
                 AssemblyLineResult::Relocation(relocation) => {
                     match relocation.typ {
                         RelocationType::U32 => {
-                            sections[i as usize].content.write(&[0 as u8; 4]).unwrap();
+                            sections[i as usize]
+                                .content
+                                .write_all(&[0 as u8; 4])
+                                .unwrap();
                             location += 4 as u64;
                         }
                         RelocationType::U64 => {
-                            sections[i as usize].content.write(&[0 as u8; 8]).unwrap();
+                            sections[i as usize]
+                                .content
+                                .write_all(&[0 as u8; 8])
+                                .unwrap();
                             location += 8 as u64;
                         }
                     }
@@ -206,7 +210,7 @@ pub fn assemble(text: &str) -> AssemblyResult {
     }
 
     AssemblyResult {
-        sections: sections,
+        sections,
         relocations: resolved_relocations,
     }
 }
